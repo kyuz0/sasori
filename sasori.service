@@ -6,8 +6,8 @@ After=network.target
 Type=simple
 User=sasori
 Group=sasori
-# Set this to the directory where your agent handlers/ and database will live
-WorkingDirectory=/path/to/your/sasori_workspace
+# Directory where the sasori database and handlers/ folder will live
+WorkingDirectory=/opt/sasori
 
 # Ensure your PATH includes where sasori was installed
 Environment="PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
