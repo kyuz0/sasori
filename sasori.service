@@ -1,18 +1,18 @@
 [Unit]
-Description=Sasori Global Mailbox Orchestrator
+Description=Sasori Agent Orchestrator
 After=network.target
 
 [Service]
 Type=simple
-User=your_username
-Group=your_group
+User=sasori
+Group=sasori
 # Set this to the directory where your agent handlers/ and database will live
 WorkingDirectory=/path/to/your/sasori_workspace
 
-# Path MUST include the pipx binary directory (usually ~/.local/bin)
-Environment="PATH=/home/your_username/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin"
-# ExecStart launches the globally installed sasori pipx binary
-ExecStart=/home/your_username/.local/bin/sasori
+# Ensure your PATH includes where sasori was installed
+Environment="PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+# ExecStart launches the sasori daemon. Adjust the path if it is not in your global PATH.
+ExecStart=/usr/local/bin/sasori
 
 StandardOutput=syslog
 StandardError=syslog

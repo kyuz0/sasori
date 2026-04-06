@@ -14,7 +14,7 @@ git clone https://github.com/yourusername/sasori
 cd sasori
 
 # Install globally using pipx
-pipx install .
+sudo pipx install --global .
 ```
 
 This makes the `sasori` CLI command available system-wide.
@@ -42,13 +42,19 @@ To connect Sasori to a Gmail mailbox, you cannot use your regular account passwo
 
 ## Running as a systemd Service (Linux)
 
-To ensure Sasori runs perpetually in the background:
+To ensure Sasori runs perpetually in the background securely, we recommend running it as a dedicated system user.
 
-1. Copy the provided `.service` template to your systemd folder:
+1. Create a dedicated system user and workspace for the daemon:
+   ```bash
+   sudo useradd -r -s /sbin/nologin sasori
+   sudo mkdir -p /opt/sasori
+   sudo chown -R sasori:sasori /opt/sasori
+   ```
+2. Copy the provided `.service` template to your systemd folder:
    ```bash
    sudo cp sasori.service /etc/systemd/system/sasori.service
    ```
-2. Edit the service to match your username, PATH, Email credentials, and set the `WorkingDirectory=` to your designated workspace folder:
+3. Edit the service to set your Email credentials and ensure `WorkingDirectory=` points to your workspace (e.g., `/opt/sasori`):
    ```bash
    sudo nano /etc/systemd/system/sasori.service
    ```
