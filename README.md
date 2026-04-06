@@ -10,7 +10,7 @@ Sasori runs entirely on Python Standard Libraries.
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/sasori
+git clone https://github.com/kyuz0/sasori
 cd sasori
 
 # Install globally using pipx
