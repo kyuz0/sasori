@@ -1,0 +1,35 @@
+[Unit]
+Description=Sasori Global Mailbox Orchestrator
+After=network.target
+
+[Service]
+Type=simple
+User=your_username
+Group=your_group
+# Set this to the directory where your agent handlers/ and database will live
+WorkingDirectory=/path/to/your/sasori_workspace
+
+# Path MUST include the pipx binary directory (usually ~/.local/bin)
+Environment="PATH=/home/your_username/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin"
+# ExecStart launches the globally installed sasori pipx binary
+ExecStart=/home/your_username/.local/bin/sasori
+
+StandardOutput=syslog
+StandardError=syslog
+SyslogIdentifier=sasori-daemon
+Restart=always
+RestartSec=10
+
+# Configure your mailbox credentials
+Environment="IMAP_SERVER=imap.gmail.com"
+Environment="SMTP_SERVER=smtp.gmail.com"
+Environment="EMAIL_ACCOUNT=your_agent_email@gmail.com"
+Environment="EMAIL_PASSWORD=your_google_app_password"
+Environment="POLL_INTERVAL=15"
+# Set limits to protect your hardware VRAM
+Environment="MAX_CONCURRENT_AGENTS=1"
+# Comma-separated list of allowed sender emails
+Environment="WHITELIST_EMAILS=your_personal_email@example.com"
+
+[Install]
+WantedBy=multi-user.target

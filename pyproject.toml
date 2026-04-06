@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sasori"
+version = "0.1.0"
+description = "A simple IMAP polling daemon for queuing local agents"
+authors = [{name = "Local Agent Builder"}]
+requires-python = ">=3.10"
+dependencies = []
+
+[project.scripts]
+sasori = "sasori.daemon:main"
+
+[tool.setuptools]
+packages = ["sasori"]
