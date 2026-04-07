@@ -226,12 +226,18 @@ def process_mailbox():
                                 send_email(from_email, subject, f"Thread {thread_id} is QUEUED.")
                             elif t_stat == "RUNNING":
                                 elapsed = int(time.time() - st)
+                                send_email(from_email, subject, f"Thread {thread_id} RUNNING ({elapsed}s). Reply LOG for logs.")
+                            else: send_email(from_email, subject, f"Thread {thread_id} is {t_stat}.")
+                            continue
+                        elif body.upper() == "LOG" or subject.upper().startswith("LOG"):
+                            if t_stat in ["RUNNING", "DONE", "STOPPED"]:
+                                elapsed = int(time.time() - st)
                                 tail = "Unable to read output."
                                 try:
                                     with open(f"/tmp/thread_{thread_id}.out", "r") as f:
                                         tail = "".join(f.readlines()[-30:])
                                 except: pass
-                                send_email(from_email, subject, f"Thread {thread_id} RUNNING ({elapsed}s).\n\nTail:\n{tail}")
+                                send_email(from_email, subject, f"Thread {thread_id} Status: {t_stat} ({elapsed}s).\n\nTail:\n{tail}")
                             else: send_email(from_email, subject, f"Thread {thread_id} is {t_stat}.")
                             continue
                         elif t_stat in ["RUNNING", "QUEUED"]:
