@@ -119,6 +119,8 @@ def run_agent_task(thread_id, user_email, subject, handler_tag):
             conn.execute("UPDATE threads SET status = 'RUNNING', start_time = ?, current_pid = ? WHERE thread_id = ?", (time.time(), proc.pid, thread_id))
             conn.commit()
             
+        send_email(user_email, subject, f"Sasori: Agent {handler_tag} has started running.")
+        
         proc.wait()
         
         with sqlite3.connect(DB_PATH) as conn:
@@ -167,7 +169,10 @@ def process_mailbox():
         status, email_ids = mail.search(None, 'UNSEEN')
         if status != 'OK': return
         
-        for eid in email_ids[0].split():
+        eids = email_ids[0].split()
+        if eids: log(f"Found {len(eids)} UNSEEN emails being processed...")
+        
+        for eid in eids:
             status, data = mail.fetch(eid, '(RFC822)')
             if status != 'OK': continue
             msg = email.message_from_bytes(data[0][1])
@@ -178,7 +183,9 @@ def process_mailbox():
             if not from_email_match: continue
             from_email = from_email_match.group(0).lower()
             
-            if WHITELIST_EMAILS and from_email not in WHITELIST_EMAILS: continue
+            if WHITELIST_EMAILS and from_email not in WHITELIST_EMAILS:
+                log(f"Dropped email from {from_email}: not in WHITELIST_EMAILS.")
+                continue
             
             body = clean_email_body(extract_body(msg)).strip()
             
@@ -198,6 +205,7 @@ def process_mailbox():
             # Match if subject starts with tag (e.g. "[test-agent]") or tag without brackets (e.g. "test-agent")
             matched_tag = next((tag for tag in _handlers.keys() if subject.lower().startswith(tag) or subject.lower().lstrip("[").startswith(tag.strip("[]"))), None)
             if not matched_tag and not re.search(r'\[Thread-[a-zA-Z0-9]+\]', subject):
+                log(f"Dropped email '{subject}': did not match any agent tags or global commands.")
                 continue # Ignore
 
             with sqlite3.connect(DB_PATH) as conn:
@@ -239,7 +247,14 @@ def process_mailbox():
                     else: continue
 
                 conn.execute("INSERT OR IGNORE INTO threads (thread_id, subject, status, start_time, handler_tag, user_email) VALUES (?, ?, 'QUEUED', ?, ?, ?)", (thread_id, subject, time.time(), matched_tag, from_email))
+                conn.execute("UPDATE threads SET status = 'QUEUED', start_time = ? WHERE thread_id = ?", (time.time(), thread_id))
                 conn.execute("INSERT INTO messages (thread_id, role, content) VALUES (?, 'user', ?)", (thread_id, body))
+                
+                running_cnt = conn.execute("SELECT COUNT(*) FROM threads WHERE status = 'RUNNING'").fetchone()[0]
+                if running_cnt >= MAX_CONCURRENT_AGENTS:
+                    q_cnt = conn.execute("SELECT COUNT(*) FROM threads WHERE status = 'QUEUED'").fetchone()[0]
+                    send_email(from_email, subject, f"Sasori: Task {matched_tag} enqueued. (Position: {q_cnt})")
+                    
                 conn.commit()
     except Exception as e:
         log(f"IMAP Trap: {e}")
