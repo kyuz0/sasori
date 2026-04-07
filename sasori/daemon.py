@@ -39,6 +39,8 @@ def init_env():
         conn.execute('''CREATE TABLE IF NOT EXISTS messages 
                         (id INTEGER PRIMARY KEY AUTOINCREMENT, thread_id TEXT, role TEXT, content TEXT)''')
         conn.commit()
+        try: conn.execute("ALTER TABLE threads ADD COLUMN msg_id TEXT")
+        except: pass
 
 def load_handlers():
     global _handlers
@@ -100,7 +102,7 @@ def clean_email_body(body):
     lines = [L for L in body.splitlines() if not (L.startswith(">") or (L.startswith("On ") and "wrote:" in L))]
     return "\n".join(lines).strip()
 
-def run_agent_task(thread_id, user_email, subject, handler_tag):
+def run_agent_task(thread_id, user_email, subject, handler_tag, msg_id=None):
     handler = _handlers.get(handler_tag)
     if not handler: return
     
@@ -119,7 +121,7 @@ def run_agent_task(thread_id, user_email, subject, handler_tag):
             conn.execute("UPDATE threads SET status = 'RUNNING', start_time = ?, current_pid = ? WHERE thread_id = ?", (time.time(), proc.pid, thread_id))
             conn.commit()
             
-        send_email(user_email, subject, f"Sasori: Agent {handler_tag} has started running.")
+        send_email(user_email, subject, f"Sasori: Agent {handler_tag} has started running.", in_reply_to=msg_id)
         
         proc.wait()
         
@@ -140,10 +142,10 @@ def run_agent_task(thread_id, user_email, subject, handler_tag):
                 conn.execute("INSERT INTO messages (thread_id, role, content) VALUES (?, 'assistant', ?)", (thread_id, res_text))
                 conn.commit()
                 
-            send_email(user_email, subject, res_text, attachments=attachments)
+            send_email(user_email, subject, res_text, in_reply_to=msg_id, attachments=attachments)
     except Exception as e:
         log(f"Agent crash {thread_id}: {e}")
-        send_email(user_email, subject, f"System Failure: {e}")
+        send_email(user_email, subject, f"System Failure: {e}", in_reply_to=msg_id)
         with sqlite3.connect(DB_PATH) as conn:
             conn.execute("UPDATE threads SET status = 'DONE' WHERE thread_id = ?", (thread_id,))
             conn.commit()
@@ -154,9 +156,9 @@ def drain_queue():
         if running >= MAX_CONCURRENT_AGENTS: return
         
         available = MAX_CONCURRENT_AGENTS - running
-        queued = conn.execute("SELECT thread_id, user_email, subject, handler_tag FROM threads WHERE status = 'QUEUED' ORDER BY start_time ASC LIMIT ?", (available,)).fetchall()
+        queued = conn.execute("SELECT thread_id, user_email, subject, handler_tag, msg_id FROM threads WHERE status = 'QUEUED' ORDER BY start_time ASC LIMIT ?", (available,)).fetchall()
         for row in queued:
-            worker = threading.Thread(target=run_agent_task, args=(row[0], row[1], row[2], row[3]))
+            worker = threading.Thread(target=run_agent_task, args=(row[0], row[1], row[2], row[3], row[4]))
             worker.daemon = True
             worker.start()
 
@@ -183,6 +185,7 @@ def process_mailbox():
             if not from_email_match: continue
             from_email = from_email_match.group(0).lower()
             
+            msg_id = str(msg.get("Message-ID", "")).strip()
             if WHITELIST_EMAILS and from_email not in WHITELIST_EMAILS:
                 log(f"Dropped email from {from_email}: not in WHITELIST_EMAILS.")
                 continue
@@ -194,11 +197,11 @@ def process_mailbox():
             if not re.search(r'\[Thread-[a-zA-Z0-9]+\]', subject) and is_global_status:
                 with sqlite3.connect(DB_PATH) as conn:
                     running = conn.execute("SELECT thread_id, subject, start_time FROM threads WHERE status = 'RUNNING'").fetchall()
-                if not running: send_email(from_email, subject, "Sasori: 0 Active Threads.")
+                if not running: send_email(from_email, subject, "Sasori: 0 Active Threads.", in_reply_to=msg_id)
                 else:
                     lines = [f"Sasori Active Threads ({len(running)}/{MAX_CONCURRENT_AGENTS}):"]
                     for t_id, subj, st in running: lines.append(f"- [{t_id}] {subj} ({int(time.time()-st)}s elapsed)")
-                    send_email(from_email, subject, "\n".join(lines))
+                    send_email(from_email, subject, "\n".join(lines), in_reply_to=msg_id)
                 continue
 
             # Handler Matching
@@ -219,15 +222,15 @@ def process_mailbox():
                             if c_pid: os.kill(c_pid, signal.SIGTERM)
                             conn.execute("UPDATE threads SET status = 'STOPPED' WHERE thread_id = ?", (thread_id,))
                             conn.commit()
-                            send_email(from_email, subject, f"Thread {thread_id} stopped.")
+                            send_email(from_email, subject, f"Thread {thread_id} stopped.", in_reply_to=msg_id)
                             continue
                         elif body.upper() == "STATUS" or subject.upper().startswith("STATUS"):
                             if t_stat == "QUEUED":
-                                send_email(from_email, subject, f"Thread {thread_id} is QUEUED.")
+                                send_email(from_email, subject, f"Thread {thread_id} is QUEUED.", in_reply_to=msg_id)
                             elif t_stat == "RUNNING":
                                 elapsed = int(time.time() - st)
-                                send_email(from_email, subject, f"Thread {thread_id} RUNNING ({elapsed}s). Reply LOG for logs.")
-                            else: send_email(from_email, subject, f"Thread {thread_id} is {t_stat}.")
+                                send_email(from_email, subject, f"Thread {thread_id} RUNNING ({elapsed}s). Reply LOG for logs.", in_reply_to=msg_id)
+                            else: send_email(from_email, subject, f"Thread {thread_id} is {t_stat}.", in_reply_to=msg_id)
                             continue
                         elif body.upper() == "LOG" or subject.upper().startswith("LOG"):
                             if t_stat in ["RUNNING", "DONE", "STOPPED"]:
@@ -237,11 +240,11 @@ def process_mailbox():
                                     with open(f"/tmp/thread_{thread_id}.out", "r") as f:
                                         tail = "".join(f.readlines()[-30:])
                                 except: pass
-                                send_email(from_email, subject, f"Thread {thread_id} Status: {t_stat} ({elapsed}s).\n\nTail:\n{tail}")
-                            else: send_email(from_email, subject, f"Thread {thread_id} is {t_stat}.")
+                                send_email(from_email, subject, f"Thread {thread_id} Status: {t_stat} ({elapsed}s, in_reply_to=msg_id).\n\nTail:\n{tail}")
+                            else: send_email(from_email, subject, f"Thread {thread_id} is {t_stat}.", in_reply_to=msg_id)
                             continue
                         elif t_stat in ["RUNNING", "QUEUED"]:
-                            send_email(from_email, subject, "Thread is busy. Reply STOP to cancel before submitting another prompt.")
+                            send_email(from_email, subject, "Thread is busy. Reply STOP to cancel before submitting another prompt.", in_reply_to=msg_id)
                             continue
                 else: 
                     thread_id = os.urandom(4).hex()
@@ -252,14 +255,14 @@ def process_mailbox():
                     if row: matched_tag = row[0]
                     else: continue
 
-                conn.execute("INSERT OR IGNORE INTO threads (thread_id, subject, status, start_time, handler_tag, user_email) VALUES (?, ?, 'QUEUED', ?, ?, ?)", (thread_id, subject, time.time(), matched_tag, from_email))
-                conn.execute("UPDATE threads SET status = 'QUEUED', start_time = ? WHERE thread_id = ?", (time.time(), thread_id))
+                conn.execute("INSERT OR IGNORE INTO threads (thread_id, subject, status, start_time, handler_tag, user_email, msg_id) VALUES (?, ?, 'QUEUED', ?, ?, ?, ?)", (thread_id, subject, time.time(), matched_tag, from_email, msg_id))
+                conn.execute("UPDATE threads SET status = 'QUEUED', start_time = ?, msg_id = ? WHERE thread_id = ?", (time.time(), msg_id, thread_id))
                 conn.execute("INSERT INTO messages (thread_id, role, content) VALUES (?, 'user', ?)", (thread_id, body))
                 
                 running_cnt = conn.execute("SELECT COUNT(*) FROM threads WHERE status = 'RUNNING'").fetchone()[0]
                 if running_cnt >= MAX_CONCURRENT_AGENTS:
                     q_cnt = conn.execute("SELECT COUNT(*) FROM threads WHERE status = 'QUEUED'").fetchone()[0]
-                    send_email(from_email, subject, f"Sasori: Task {matched_tag} enqueued. (Position: {q_cnt})")
+                    send_email(from_email, subject, f"Sasori: Task {matched_tag} enqueued. (Position: {q_cnt})", in_reply_to=msg_id)
                     
                 conn.commit()
     except Exception as e:
