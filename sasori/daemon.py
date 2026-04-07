@@ -183,7 +183,8 @@ def process_mailbox():
             body = clean_email_body(extract_body(msg)).strip()
             
             # Global STATUS check
-            if not re.search(r'\[Thread-[a-zA-Z0-9]+\]', subject) and body.upper() == "STATUS":
+            is_global_status = (body.upper() == "STATUS" or subject.upper().strip() == "STATUS")
+            if not re.search(r'\[Thread-[a-zA-Z0-9]+\]', subject) and is_global_status:
                 with sqlite3.connect(DB_PATH) as conn:
                     running = conn.execute("SELECT thread_id, subject, start_time FROM threads WHERE status = 'RUNNING'").fetchall()
                 if not running: send_email(from_email, subject, "Sasori: 0 Active Threads.")
@@ -194,7 +195,8 @@ def process_mailbox():
                 continue
 
             # Handler Matching
-            matched_tag = next((tag for tag in _handlers.keys() if subject.lower().startswith(tag)), None)
+            # Match if subject starts with tag (e.g. "[test-agent]") or tag without brackets (e.g. "test-agent")
+            matched_tag = next((tag for tag in _handlers.keys() if subject.lower().startswith(tag) or subject.lower().lstrip("[").startswith(tag.strip("[]"))), None)
             if not matched_tag and not re.search(r'\[Thread-[a-zA-Z0-9]+\]', subject):
                 continue # Ignore
 
@@ -211,7 +213,7 @@ def process_mailbox():
                             conn.commit()
                             send_email(from_email, subject, f"Thread {thread_id} stopped.")
                             continue
-                        elif body.upper() == "STATUS":
+                        elif body.upper() == "STATUS" or subject.upper().startswith("STATUS"):
                             if t_stat == "QUEUED":
                                 send_email(from_email, subject, f"Thread {thread_id} is QUEUED.")
                             elif t_stat == "RUNNING":
