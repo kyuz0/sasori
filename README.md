@@ -27,7 +27,94 @@ Upon first run, Sasori automatically creates a `handlers/` directory and a `saso
 
 Place Python scripts representing your agents inside this `handlers/` directory. The daemon will dynamically load any scripts mapping subject tags to system executables.
 
-See the `examples/test_handler.py` file for a simple example of how an agent integrates with Sasori.
+### Writing Agent Handlers
+
+Each handler should inherit from `BaseMailboxHandler` and define how it responds to specific email tags. Here is a basic structure:
+
+```python
+import subprocess
+import os
+from sasori.handler import BaseMailboxHandler
+
+class MyAgentHandler(BaseMailboxHandler):
+    # What string triggers this agent? (e.g. Subject: [my-agent] Fix my issue!)
+    agent_tag = "[my-agent]" 
+    
+    # Path or CLI binary for the agent
+    agent_command = "echo"
+
+    def execute(self, thread_id: str, prompt_file: str, stdout_file: str) -> subprocess.Popen:
+        """Called automatically when an email thread targets this agent."""
+        cmd = [self.agent_command, "Hello from the new agent!"]
+        agent_cwd = self.get_agent_workspace()
+        
+        return subprocess.Popen(
+            cmd,
+            cwd=agent_cwd,
+            stdout=open(stdout_file, "w"),
+            stderr=subprocess.STDOUT,
+            text=True,
+            env=dict(os.environ)
+        )
+
+# Tell the daemon about your handlers
+HANDLERS = [MyAgentHandler()]
+```
+
+### Security & Agent Sandboxing
+
+If you are running dynamic CLI agents that execute generated code (or perform unverified read/writes), you can optionally sandbox them using Anthropic's Sandbox Runtime (`srt`). 
+
+Sandboxing uses native OS isolation primitives (e.g., `bubblewrap` on Linux) to tightly control an agent's filesystem and egress permissions. 
+
+**Execution CWD (`Current Working Directory`)**
+By default, the daemon launches your agent processes attached directly to a dedicated workspace folder specifically created for that agent inside `agent_workspaces/`. 
+When sandboxing is enabled:
+* Write access is strictly denied everywhere system-wide by default.
+* Your agent's unique workspace (CWD) and `/tmp` are explicitly granted read/write approval.
+* Any paths mapping to `sandbox_deny_workspace_patterns` are stripped of write/read permissions natively inside that workspace folder!
+
+Enable isolation securely in your handler class:
+
+```python
+class IsolatedAgentHandler(BaseMailboxHandler):
+    agent_tag = "[isolated-agent]"
+    agent_command = "python3"
+
+    # 1. Enable Sandbox Primitives natively
+    sandbox_enabled = True
+    
+    # 2. Network domains (forces air-gap if omitted)
+    sandbox_network_domains = ["pip.pypa.io", "github.com", "registry.npmjs.org"]
+    
+    # 3. Restrict host environment variable poisoning
+    sandbox_env_whitelist = ["PATH", "HOME", "USER", "SHELL", "TERM"]
+    
+    # 4. Explicit read/write denial within the writable workspace zone
+    sandbox_deny_workspace_patterns = ["**/*.secret", ".env*"]
+    
+    # 5. Prevent escalation vectors structurally
+    sandbox_deny_binaries = ["docker", "terraform"]
+
+    def execute(self, thread_id: str, prompt_file: str, stdout_file: str) -> subprocess.Popen:
+        cmd = [self.agent_command, "agent.py", "--prompt", prompt_file]
+        env = dict(os.environ)
+
+        # Call the sandbox wrapper generator before you construct the Popen stream
+        if self.sandbox_enabled:
+            cmd, env = self._wrap_sandbox(cmd, thread_id)
+            
+        agent_cwd = self.get_agent_workspace()
+
+        return subprocess.Popen(
+            cmd,
+            cwd=agent_cwd,
+            stdout=open(stdout_file, "w"),
+            stderr=subprocess.STDOUT,
+            text=True,
+            env=env
+        )
+```
 
 ## Gmail Setup (App Passwords)
 

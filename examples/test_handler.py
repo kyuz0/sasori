@@ -28,9 +28,12 @@ print('Test Agent: DONE', flush=True)
 
         if self.sandbox_enabled:
             cmd, env = self._wrap_sandbox(cmd, thread_id)
+            
+        agent_cwd = self.get_agent_workspace()
 
         return subprocess.Popen(
             cmd,
+            cwd=agent_cwd,
             stdout=open(stdout_file, "w"),
             stderr=subprocess.STDOUT,
             text=True,

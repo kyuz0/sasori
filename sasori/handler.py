@@ -15,6 +15,13 @@ class BaseMailboxHandler:
     sandbox_deny_workspace_patterns = []
     sandbox_deny_binaries = []
 
+    def get_agent_workspace(self) -> str:
+        tag_name = getattr(self, "agent_tag", self.__class__.__name__).strip("[] ")
+        tag_name = tag_name.replace("/", "_").replace("\\", "_")
+        target_dir = Path.cwd() / "agent_workspaces" / tag_name
+        target_dir.mkdir(parents=True, exist_ok=True)
+        return str(target_dir.resolve())
+
     def _wrap_sandbox(self, command: list, thread_id: str) -> tuple[list, dict]:
         settings_file = f"/tmp/thread_{thread_id}_srt.json"
         
@@ -26,10 +33,10 @@ class BaseMailboxHandler:
             os.path.join(home, ".aws")
         ]
         deny_write = []
-        cwd = str(Path.cwd())
+        agent_cwd = self.get_agent_workspace()
         
         for pattern in self.sandbox_deny_workspace_patterns:
-            for p in Path(cwd).rglob(pattern):
+            for p in Path(agent_cwd).rglob(pattern):
                 deny_read.append(str(p))
                 deny_write.append(str(p))
                 
@@ -48,8 +55,8 @@ class BaseMailboxHandler:
             },
             "filesystem": {
                 "denyRead": deny_read,
-                "allowRead": [cwd, "/tmp"],
-                "allowWrite": [cwd, "/tmp"],
+                "allowRead": [agent_cwd, "/tmp"],
+                "allowWrite": [agent_cwd, "/tmp"],
                 "denyWrite": deny_write
             }
         }
@@ -83,9 +90,12 @@ class BaseMailboxHandler:
 
         if self.sandbox_enabled:
             cmd, env = self._wrap_sandbox(cmd, thread_id)
+            
+        agent_cwd = self.get_agent_workspace()
 
         return subprocess.Popen(
             cmd,
+            cwd=agent_cwd,
             stdout=open(stdout_file, "w"),
             stderr=subprocess.STDOUT,
             text=True,
