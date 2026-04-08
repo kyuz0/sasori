@@ -273,11 +273,39 @@ def process_mailbox():
     except Exception as e:
         log(f"IMAP Trap: {e}")
 
+def cleanup_orphaned_tasks():
+    with sqlite3.connect(DB_PATH) as conn:
+        orphans = conn.execute("SELECT thread_id, subject, user_email, msg_id FROM threads WHERE status = 'RUNNING'").fetchall()
+        for thread_id, subject, user_email, msg_id in orphans:
+            conn.execute("UPDATE threads SET status = 'FAILED' WHERE thread_id = ?", (thread_id,))
+            send_email(user_email, subject, "Service Restarted: Task Cancelled.", in_reply_to=msg_id)
+        conn.commit()
+
+def shutdown_handler(signum, frame):
+    log("Shutting down daemon gracefully...")
+    with sqlite3.connect(DB_PATH) as conn:
+        active = conn.execute("SELECT thread_id, subject, user_email, msg_id, current_pid FROM threads WHERE status IN ('RUNNING', 'QUEUED')").fetchall()
+        for thread_id, subject, user_email, msg_id, c_pid in active:
+            conn.execute("UPDATE threads SET status = 'FAILED' WHERE thread_id = ?", (thread_id,))
+            if c_pid:
+                try:
+                    os.kill(c_pid, signal.SIGTERM)
+                except Exception:
+                    pass
+            send_email(user_email, subject, "Service Stopped: Task Cancelled.", in_reply_to=msg_id)
+        conn.commit()
+    sys.exit(0)
+
 def main():
     if not (EMAIL_ACCOUNT and EMAIL_PASSWORD):
         log("ERROR: MISSING CREDENTIALS")
         sys.exit(1)
+        
+    signal.signal(signal.SIGTERM, shutdown_handler)
+    signal.signal(signal.SIGINT, shutdown_handler)
+    
     init_env()
+    cleanup_orphaned_tasks()
     load_handlers()
     log(f"Sasori polling (Int:{POLL_INTERVAL}s, MaxConcurrent:{MAX_CONCURRENT_AGENTS})")
     while True:
