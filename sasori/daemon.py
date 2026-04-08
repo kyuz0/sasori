@@ -125,6 +125,11 @@ def run_agent_task(thread_id, user_email, subject, handler_tag, msg_id=None):
         
         proc.wait()
         
+        srt_settings_file = f"/tmp/thread_{thread_id}_srt.json"
+        if os.path.exists(srt_settings_file):
+            try: os.remove(srt_settings_file)
+            except: pass
+
         with sqlite3.connect(DB_PATH) as conn:
             status = conn.execute("SELECT status FROM threads WHERE thread_id = ?", (thread_id,)).fetchone()
             if status[0] == 'STOPPED':
